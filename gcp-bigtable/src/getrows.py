@@ -75,7 +75,7 @@ def _get_target_column_list(market: str) -> list:
     return target_cols
 
 
-def _get_single_row(table_instance, rowkey: str, sep: str = "#") -> models.ModelOddBasicInfo:
+def _get_single_row(table_instance, rowkey: str, sep: str) -> models.ModelOddBasicInfo:
     """Get a single row matching the given ``rowkey``.
 
     This function tries to get a single row from the given ``table_instance`` 
@@ -117,7 +117,7 @@ def _get_single_row(table_instance, rowkey: str, sep: str = "#") -> models.Model
     return row_model
 
 
-def get_rowkeys(table_name: str, rowkeys: List[str]):
+def get_rowkeys(table_instance, rowkeys: List[str], sep: str = "#"):
     """Query table with respect to given ``table_name`` and ``rowkeys``.
 
     Given at least one element in `rowkeys`, this function queries the 
@@ -127,7 +127,17 @@ def get_rowkeys(table_name: str, rowkeys: List[str]):
         table_name (str): The table name to query.
         rowkeys (List[str]): A list of rowkeys to query.
     """
-    pass
+    row_model = list()
+    if len(rowkeys) == 1:
+        model = _get_single_row(table_instance, rowkeys[0], sep = ":")
+        row_model.append(model)
+    elif len(rowkeys) > 1:
+        for rowkey in rowkeys:
+            model = _get_single_row(table_instance, rowkey, sep = ":")
+            row_model.append(model)
+    
+    return row_model
+
 
 
 def scan_rows_range(start: str, end: str):
@@ -143,7 +153,7 @@ def scan_rows_range(start: str, end: str):
     pass
 
 
-def main(project_id: str, instance_id: str, table_name: str, rowkey: str, start_rowkey: str, end_rowkey: str) -> None:
+def main(project_id: str, instance_id: str, table_name: str, rowkeys: str, start_rowkey: str, end_rowkey: str) -> None:
     """The main function of ``getrows`` program.
 
     This main function takes 6 parameters 
@@ -157,12 +167,13 @@ def main(project_id: str, instance_id: str, table_name: str, rowkey: str, start_
         end_rowkey (str): [description]
     """
     table = get_table_instance(project_id, instance_id, table_name)
-    if rowkey:
+    if len(rowkeys) >= 1:
         start = time.process_time()
-        model = _get_single_row(table, rowkey, sep = ":")
+        model_list = get_rowkeys(table, rowkeys, sep = ":")
         end = time.process_time()
         print("Elapsed time for getting single row: {}s".format(end - start))
-        print(model.dict())
+        for model in model_list:
+            print(model.dict())
     else:
         pass
 
@@ -187,10 +198,9 @@ if __name__ == "__main__":
         default='odds')
     parser.add_argument(
         '--rowkey',
-        type=str,
+        action="append",
         help="A given row key with \"#\" as seperator. Once specified, \
             \'--start-rowkey\' and \'--end-rowkey\' will have no effect.",
-        default=""
     )
     parser.add_argument(
         "--start_rowkey",
