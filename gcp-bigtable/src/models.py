@@ -101,7 +101,7 @@ class ColumnModelOU(BaseModel):
     ovr: str
     und: str
 
-class ModelOddBasicInfo(BaseModel):
+class RowModelOdd(BaseModel):
     """Representation of a row in the Bigtable.
 
     Args:

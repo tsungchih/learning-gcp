@@ -35,7 +35,9 @@ def get_table_instance(
     return table
 
 
-def _get_row_json(rowkey: str, sep: str) -> dict:
+def _transform_row_model(
+    rowkey: str, row: dict, sep: str
+) -> models.RowModelOdd:
     """Generate a dictionary from the given ``row_obj``.
 
     Args:
@@ -43,13 +45,40 @@ def _get_row_json(rowkey: str, sep: str) -> dict:
         sep (str): The delimiter used in the given ``rowkey``.
 
     Returns:
-        dict: A dictionary initialized with the given ``rowkey``.
+        models.RowModelOdd: A ``RowModelOdd`` object initialized with the given ``rowkey``.
     """
     keys = ["sid", "lid", "mid", "mkt", "seq", "per", "vendor", "ts"]
+    info_list: list = ["s", "per", "et"]
+
     row_dict = dict(zip(keys, rowkey.split(sep)))
     row_dict["info"] = {}
     row_dict["odds"] = {}
-    return row_dict
+    row_model = models.RowModelOdd(**row_dict)
+    
+    info_dict: dict = {}
+    for col in info_list:
+        col_name = ":".join(["info", col])
+        info_dict[col] = row[col_name.encode("utf-8")]
+    row_model.info = models.OddInfoModel(**info_dict)
+
+    target_cols = _get_target_column_list(row_model.mkt)
+    odds_dict: dict = {}
+    for col in target_cols:
+        col_name = ":".join(["odds", col])
+        odds_dict[col] = row[col_name.encode("utf-8")]
+
+    odd_model = None
+    mkt: str = row_model.mkt
+    if mkt.startswith("1x2"):
+        odd_model = models.ColumnModel1x2(**odds_dict)
+    elif mkt.startswith("ah"):
+        odd_model = models.ColumnModelAH(**odds_dict)
+    else:
+        odd_model = models.ColumnModelOU(**odds_dict)
+
+    row_model.odds = odd_model
+
+    return row_model
 
 
 def _get_target_column_list(market: str) -> list:
@@ -79,7 +108,7 @@ def _get_target_column_list(market: str) -> list:
 
 def _get_single_row(
     table_instance, rowkey: str, sep: str,
-) -> models.ModelOddBasicInfo:
+) -> models.RowModelOdd:
     """Get a single row matching the given ``rowkey``.
 
     This function tries to get a single row from the given ``table_instance`` 
@@ -91,39 +120,18 @@ def _get_single_row(
         sep (str, optional): The delimiter used in the given ``rowkey``. Defaults to "#".
 
     Returns:
-        models.ModelOddBasicInfo: The data model corresponding to the query result.
+        models.RowModelOdd: The data model corresponding to the query result.
     """
-    info_list: list = ["s", "per", "et"]
     key = rowkey.encode('utf-8')
     row = table_instance.row(key)
-    row_json = _get_row_json(rowkey, sep)
-    row_model = models.ModelOddBasicInfo(**row_json)
-    for col in info_list:
-        col_name = ":".join(["info", col])
-        row_json["info"][col] = row[col_name.encode("utf-8")]
-    row_info_model = models.OddInfoModel(**row_json["info"])
-
-    target_cols = _get_target_column_list(row_json["mkt"])
-    for col in target_cols:
-        col_name = ":".join(["odds", col])
-        row_json["odds"][col] = row[col_name.encode("utf-8")]
-
-    odd_model = None
-    if row_json["mkt"].startswith("1x2"):
-        odd_model = models.ColumnModel1x2(**row_json["odds"])
-    elif row_json["mkt"].startswith("ah"):
-        odd_model = models.ColumnModelAH(**row_json["odds"])
-    else:
-        odd_model = models.ColumnModelOU(**row_json["odds"])
-
-    row_model.info = row_info_model
-    row_model.odds = odd_model
+    row_model = _transform_row_model(rowkey, row, sep)
+    
     return row_model
 
 
 def get_rowkeys(
     table_instance, rowkeys: List[str], sep: str = "#",
-) -> List[models.ModelOddBasicInfo]:
+) -> List[models.RowModelOdd]:
     """Query table with respect to given ``table_instance`` and ``rowkeys``.
 
     Given at least one element in `rowkeys`, this function queries the 
@@ -135,33 +143,33 @@ def get_rowkeys(
         sep (str): The delimiter in the given row keys.
 
     Returns:
-        List[models.ModelOddBasicInfo]: A list of data model corresponding to the query result.
+        List[models.RowModelOdd]: A list of data model corresponding to the query result.
     """
-    row_model = list()
-    if len(rowkeys) == 1:
-        model = _get_single_row(table_instance, rowkeys[0], sep=":")
-        row_model.append(model)
-    elif len(rowkeys) > 1:
-        for rowkey in rowkeys:
-            model = _get_single_row(table_instance, rowkey, sep=":")
-            row_model.append(model)
+    row_model = [_get_single_row(table_instance, rowkey, sep=":") for rowkey in rowkeys]
 
     return row_model
 
-
+    
 def scan_rows_range(
-    start: str, end: str, sep: str,
-) -> List[models.ModelOddBasicInfo]:
+    table_instance: happybase.Table, start: str, stop: str, sep: str
+) -> List[models.RowModelOdd]:
     """
 
     Given start row key and end row key, this function queries the 
     target table
 
     Args:
-        start (str): [description]
-        end (str): [description]
+        table_instance(happybase.Table): The table instance to be scanned.
+        start (str): A row key indicates the start of a row key range to scan.
+        end (str): A row key indicates the stop of a row key range to scan.
+        sep (str): The delimiter in the given row keys.
+    
+    Returns:
+        List[models.RowModelOdd]: A list of scanning results.
     """
-    pass
+    rows = table_instance.scan(row_start=start, row_stop=stop)
+    row_model = [_transform_row_model(key.decode("utf-8"), row, sep) for key, row in rows]
+    return row_model
 
 
 def main(
@@ -196,7 +204,7 @@ def main(
             print(model.dict())
     else:
         start = time.process_time()
-        model_list = scan_rows_range(start_rowkey, stop_rowkey, rowkey_sep)
+        model_list = scan_rows_range(table, start_rowkey, stop_rowkey, rowkey_sep)
         end = time.process_time()
         print("Elapsed time for scanning row range: {}s".format(end - start))
         for model in model_list:
