@@ -10,7 +10,9 @@ from pydantic import BaseModel
 from typing import List
 
 
-def get_table_instance(project_id: str, instance_id: str, table_name: str) -> happybase.table.Table:
+def get_table_instance(
+    project_id: str, instance_id: str, table_name: str
+) -> happybase.Table:
     """Create a table instance according to the given ``project_id``, ``instance_id``, and ``table_name``.
 
     This function create a table instance for reading/writing data.
@@ -41,7 +43,7 @@ def _get_row_json(rowkey: str, sep: str) -> dict:
         sep (str): The delimiter used in the given ``rowkey``.
 
     Returns:
-        dict: [description]
+        dict: A dictionary initialized with the given ``rowkey``.
     """
     keys = ["sid", "lid", "mid", "mkt", "seq", "per", "vendor", "ts"]
     row_dict = dict(zip(keys, rowkey.split(sep)))
@@ -52,7 +54,7 @@ def _get_row_json(rowkey: str, sep: str) -> dict:
 
 def _get_target_column_list(market: str) -> list:
     """Generate a column list according to the ``market``.
-    
+
     Each market has its own column list. This function generates the corresponding list 
     of column qualifiers in terms of the given ``market``.
 
@@ -75,7 +77,9 @@ def _get_target_column_list(market: str) -> list:
     return target_cols
 
 
-def _get_single_row(table_instance, rowkey: str, sep: str) -> models.ModelOddBasicInfo:
+def _get_single_row(
+    table_instance, rowkey: str, sep: str,
+) -> models.ModelOddBasicInfo:
     """Get a single row matching the given ``rowkey``.
 
     This function tries to get a single row from the given ``table_instance`` 
@@ -103,7 +107,7 @@ def _get_single_row(table_instance, rowkey: str, sep: str) -> models.ModelOddBas
     for col in target_cols:
         col_name = ":".join(["odds", col])
         row_json["odds"][col] = row[col_name.encode("utf-8")]
-    
+
     odd_model = None
     if row_json["mkt"].startswith("1x2"):
         odd_model = models.ColumnModel1x2(**row_json["odds"])
@@ -117,30 +121,37 @@ def _get_single_row(table_instance, rowkey: str, sep: str) -> models.ModelOddBas
     return row_model
 
 
-def get_rowkeys(table_instance, rowkeys: List[str], sep: str = "#"):
-    """Query table with respect to given ``table_name`` and ``rowkeys``.
+def get_rowkeys(
+    table_instance, rowkeys: List[str], sep: str = "#",
+) -> List[models.ModelOddBasicInfo]:
+    """Query table with respect to given ``table_instance`` and ``rowkeys``.
 
     Given at least one element in `rowkeys`, this function queries the 
     target table in Bigtable to retrieve the corresponding columns.
 
     Args:
-        table_name (str): The table name to query.
+        table_instance (str): The table instance on GCP.
         rowkeys (List[str]): A list of rowkeys to query.
+        sep (str): The delimiter in the given row keys.
+
+    Returns:
+        List[models.ModelOddBasicInfo]: A list of data model corresponding to the query result.
     """
     row_model = list()
     if len(rowkeys) == 1:
-        model = _get_single_row(table_instance, rowkeys[0], sep = ":")
+        model = _get_single_row(table_instance, rowkeys[0], sep=":")
         row_model.append(model)
     elif len(rowkeys) > 1:
         for rowkey in rowkeys:
-            model = _get_single_row(table_instance, rowkey, sep = ":")
+            model = _get_single_row(table_instance, rowkey, sep=":")
             row_model.append(model)
-    
+
     return row_model
 
 
-
-def scan_rows_range(start: str, end: str):
+def scan_rows_range(
+    start: str, end: str, sep: str,
+) -> List[models.ModelOddBasicInfo]:
     """
 
     Given start row key and end row key, this function queries the 
@@ -153,29 +164,43 @@ def scan_rows_range(start: str, end: str):
     pass
 
 
-def main(project_id: str, instance_id: str, table_name: str, rowkeys: str, start_rowkey: str, end_rowkey: str) -> None:
-    """The main function of ``getrows`` program.
+def main(
+    project_id: str, 
+    instance_id: str, 
+    table_name: str, 
+    rowkeys: List[str], 
+    start_rowkey: str, 
+    stop_rowkey: str, 
+    rowkey_sep: str,
+) -> None:
+    """The main function of ``getrows.py`` program.
 
-    This main function takes 6 parameters 
+    This main function connects to a table instance on GCP according to the 
+    provided ``project_id``, ``instance_id``, and ``table_name``. 
 
     Args:
-        project_id (str): [description]
-        instance_id (str): [description]
-        table_name (str): [description]
-        rowkey (str): [description]
-        start_rowkey (str): [description]
-        end_rowkey (str): [description]
+        project_id (str): Project ID on GCP.
+        instance_id (str): Bigtable instance ID on GCP.
+        table_name (str): Table name in Bigtable instance on GCP.
+        rowkey (List[str]): A list of specified row keys.
+        start_rowkey (str): A row key indicates the start of a row key range to scan.
+        end_rowkey (str): A row key indicates the stop of a row key range to scan.
     """
     table = get_table_instance(project_id, instance_id, table_name)
-    if len(rowkeys) >= 1:
+    if rowkeys and len(rowkeys) >= 1:
         start = time.process_time()
-        model_list = get_rowkeys(table, rowkeys, sep = ":")
+        model_list = get_rowkeys(table, rowkeys, rowkey_sep)
         end = time.process_time()
         print("Elapsed time for getting single row: {}s".format(end - start))
         for model in model_list:
             print(model.dict())
     else:
-        pass
+        start = time.process_time()
+        model_list = scan_rows_range(start_rowkey, stop_rowkey, rowkey_sep)
+        end = time.process_time()
+        print("Elapsed time for scanning row range: {}s".format(end - start))
+        for model in model_list:
+            print(model.dict())
 
 
 if __name__ == "__main__":
@@ -199,24 +224,30 @@ if __name__ == "__main__":
     parser.add_argument(
         '--rowkey',
         action="append",
-        help="A given row key with \"#\" as seperator. Once specified, \
-            \'--start-rowkey\' and \'--end-rowkey\' will have no effect.",
+        help=("A given row key with \"#\" as seperator. Once specified, "
+              "\'--start-rowkey\' and \'--end-rowkey\' will have no effect."),
     )
     parser.add_argument(
-        "--start_rowkey",
+        "--rowkey-sep",
         type=str,
-        help="The start row key for range search based on row key. Once \
-            specified, \'--rowkey\' must not be given.",
+        default="#",
+        help="The delimiter used in the row key. Defaults to \"#\""
+    )
+    parser.add_argument(
+        "--start-rowkey",
+        type=str,
+        help=("The start row key for range search based on row key. Once"
+              "specified, \'--rowkey\' must not be given."),
         default=""
     )
     parser.add_argument(
-        "--end_rowkey",
+        "--stop-rowkey",
         type=str,
-        help="The end row key for range search based on row key. This \
-            parameter must be used against \'--start-rowkey\'.",
+        help=("The end row key for range search based on row key. This"
+              "parameter must be used against \'--start-rowkey\'."),
         default=""
     )
 
     args = parser.parse_args()
     main(args.project_id, args.instance_id, args.table,
-         args.rowkey, args.start_rowkey, args.end_rowkey)
+         args.rowkey, args.start_rowkey, args.stop_rowkey, args.rowkey_sep)
