@@ -1,0 +1,8 @@
+alabaster==0.7.12
+docutils==0.16
+google-cloud-happybase==0.33.0
+pydantic==1.6.1
+pytest==6.1.1
+pytest-cov==2.10.1
+python-dateutil==2.8.1
+Sphinx==3.2.1
